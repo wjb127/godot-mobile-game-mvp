@@ -1,0 +1,110 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            export_name: "Linux/X11"
+          - os: windows-latest
+            platform: windows
+            export_name: "Windows Desktop"
+          - os: macos-latest
+            platform: mac
+            export_name: "macOS"
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        lfs: true
+
+    - name: Setup Godot
+      uses: lihop/setup-godot@v2
+      with:
+        version: '4.3.0'
+
+    - name: Setup export templates
+      run: |
+        mkdir -p ~/.local/share/godot/export_templates/
+        wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz
+        unzip -q Godot_v4.3-stable_export_templates.tpz
+        mv templates/* ~/.local/share/godot/export_templates/
+        rm -rf templates Godot_v4.3-stable_export_templates.tpz
+
+    - name: Create builds directory
+      run: mkdir -p builds/${{ matrix.platform }}
+
+    - name: Build for ${{ matrix.platform }}
+      run: |
+        if [ "${{ matrix.platform }}" == "windows" ]; then
+          godot --headless --export-release "${{ matrix.export_name }}" builds/${{ matrix.platform }}/MobileTapGame.exe
+        elif [ "${{ matrix.platform }}" == "mac" ]; then
+          godot --headless --export-release "${{ matrix.export_name }}" builds/${{ matrix.platform }}/MobileTapGame.app
+        else
+          godot --headless --export-release "${{ matrix.export_name }}" builds/${{ matrix.platform }}/MobileTapGame
+        fi
+      shell: bash
+
+    - name: Zip builds
+      run: |
+        cd builds/${{ matrix.platform }}
+        if [ "${{ matrix.platform }}" == "windows" ]; then
+          zip -r ../../MobileTapGame-${{ matrix.platform }}.zip MobileTapGame.exe
+        elif [ "${{ matrix.platform }}" == "mac" ]; then
+          zip -r ../../MobileTapGame-${{ matrix.platform }}.zip MobileTapGame.app
+        else
+          zip -r ../../MobileTapGame-${{ matrix.platform }}.zip MobileTapGame
+        fi
+      shell: bash
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: MobileTapGame-${{ matrix.platform }}
+        path: MobileTapGame-${{ matrix.platform }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          MobileTapGame-windows/MobileTapGame-windows.zip
+          MobileTapGame-mac/MobileTapGame-mac.zip
+          MobileTapGame-linux/MobileTapGame-linux.zip
+        body: |
+          ## 🎮 Mobile Tap Game Release
+          
+          ### 다운로드 방법
+          - Windows: `MobileTapGame-windows.zip` 다운로드 후 압축 해제
+          - macOS: `MobileTapGame-mac.zip` 다운로드 후 압축 해제
+          - Linux: `MobileTapGame-linux.zip` 다운로드 후 압축 해제
+          
+          ### 게임 조작법
+          - 키보드: ↑↓←→ 방향키
+          - 마우스: 클릭한 위치로 이동
+          
+          ### 변경사항
+          - 8방향 이동 지원
+          - 적이 4방향에서 랜덤 출현
+          - 대각선 적 이동 패턴 추가
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
